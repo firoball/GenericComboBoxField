@@ -1,8 +1,10 @@
 # ComboBoxField / GenericComboBoxField
 
 Custom UI Toolkit combo box controls: a text input with live search, a dropdown
-popup, and optional clear(x) / add(+) / remove(-) buttons to edit the underlying
-list. No `UnityEditor` dependency - works in editor windows and at runtime.
+popup, and clear(x) / undo(↺) / add(+) / remove(-) buttons to edit the current
+text and the underlying list. Supports an optional detailed popup-row view for
+non-primitive types. No `UnityEditor` dependency - works in editor windows and
+at runtime.
 
 Two classes:
 
@@ -21,7 +23,7 @@ Put all three in a UI Toolkit-capable folder (e.g. `Assets/UI/Controls/`).
 The `.uss` needs to be referenced by your panel/UXML (`StyleSheets` in UXML,
 or `visualElement.styleSheets.Add(...)` in code).
 
-## `ComboBoxField` usage (string list, same as before)
+## `ComboBoxField` usage (string list)
 
 ```csharp
 var combo = new ComboBoxField
@@ -81,15 +83,14 @@ the raw typed text. It changes when:
 - you set `combo.value = someItem` / `combo.SetValueWithoutNotify(someItem)` in code.
 
 Typing just filters the popup - it does not change `value` or fire
-`ChangeEvent<T>` on every keystroke. If you need live text as the user types,
-read `combo` via its internal text field is not exposed publicly by design (a
-generic `T` can't represent "partial text"); wire a callback on the specific
-`T` construction path instead (e.g. via `ItemFactory`).
+`ChangeEvent<T>` on every keystroke. The internal text field isn't exposed
+publicly by design (a generic `T` can't represent "partial text"); if you
+need live text as the user types, wire a callback on the specific `T`
+construction path instead (e.g. via `ItemFactory`).
 
 ## Detail mode
 
-- Off by default (`AllowDetailMode = false`) - no checkbox, brief rows only,
-  identical to the original control.
+- Off by default (`AllowDetailMode = false`) - no checkbox, brief rows only.
 - The checkbox only appears when `AllowDetailMode = true` **and**
   `DetailViewBuilder` is set. Without a builder, detail rows would look
   identical to brief rows (same `ToString()` label), so a toggle with no
@@ -125,7 +126,8 @@ generic `T` can't represent "partial text"); wire a callback on the specific
   behavior below.
   On click it constructs the item, adds it to `Choices`, and selects it.
 - `-` removes the current full match (`T.ToString()` case-insensitive equals
-  the typed text) from `Choices`. Governed by `AllowDelete`.
+  the typed text) from `Choices`. `AllowDelete` (default `true`) both hides and
+  disables the button when `false`, mirroring how `AllowAdd` gates `+`.
 
 ## External list changes
 
@@ -141,9 +143,9 @@ afterwards so filtering, sorting, and button states get recalculated.
 
 ## Layout
 
-- The text field, an embedded clear (x) button, and an embedded arrow (▼) button
-  sit inside one wrapper on the left; the + and - buttons sit outside it, in that
-  order.
+- The text field, with the clear (x), undo (↺), and dropdown-toggle (▼) buttons
+  embedded inside it, sits in one wrapper on the left; the + and - buttons sit
+  outside it, in that order.
 - The popup is constrained to the wrapper's width, so it never extends past the
   text field under the outer +/- buttons. It's a column: the scrollable row
   list on top, the optional detail-mode footer beneath it.
