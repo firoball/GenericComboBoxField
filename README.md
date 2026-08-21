@@ -52,7 +52,7 @@ var combo = new GenericComboBoxField<Unit>
     VisibleRowCount = 6,
     MaxPopupHeight = 320,                 // hard cap in px, regardless of row mode/count
     AllowDetailMode = true,               // shows the "Details" checkbox in the popup footer
-    ItemFactory = text => new Unit(text), // only needed for non-string/primitive T
+    ItemFactory = CreateUnitFromText,     // any Func<string, Unit> - not tied to a string ctor
     DetailViewBuilder = unit =>
     {
         // Build whatever VisualElement you want for a detailed row. Called once per
@@ -70,6 +70,13 @@ combo.RegisterValueChangedCallback(evt =>
 });
 
 root.Add(combo);
+
+// ItemFactory just needs to be a Func<string, Unit> - a lambda, a local function, or (as
+// here) a named method. 
+Unit CreateUnitFromText(string text)
+{
+    return new Unit { Name = text, Hp = 10 };
+}
 ```
 
 ## Value model
