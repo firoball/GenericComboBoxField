@@ -100,13 +100,16 @@ namespace UI.Controls
         public bool AllowAdd { get; set; } = true;
 
         /// <summary>
-        /// Constructs a new T instance from typed text for the Add(+) button. Optional: if left
-        /// null, string and primitive T (int, float, bool, etc.) are handled automatically -
-        /// no callback needed for those. For any other T, the Add button stays hidden until a
-        /// factory is supplied here, since constructing an arbitrary class from text isn't
-        /// possible in general.
+        /// Constructs a new T instance from typed text for the Add(+) button. Args: the typed
+        /// text, and the currently committed value (default(T) if nothing's selected yet) - the
+        /// latter is handed in explicitly since there's no reference to the control itself
+        /// available at the point this is normally wired up (e.g. an object initializer).
+        /// Optional: if left null, string and primitive T (int, float, bool, etc.) are handled
+        /// automatically - no callback needed for those. For any other T, the Add button stays
+        /// hidden until a factory is supplied here, since constructing an arbitrary class from
+        /// text isn't possible in general.
         /// </summary>
-        public Func<string, T> ItemFactory { get; set; }
+        public Func<string, T, T> ItemFactory { get; set; }
 
         /// <summary>
         /// The data list this control searches/edits. Assign a reference; if the underlying
@@ -256,7 +259,7 @@ namespace UI.Controls
         {
             if (ItemFactory != null)
             {
-                result = ItemFactory(text);
+                result = ItemFactory(text, _value);
                 return (object)result != null;
             }
 

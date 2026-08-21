@@ -71,11 +71,14 @@ combo.RegisterValueChangedCallback(evt =>
 
 root.Add(combo);
 
-// ItemFactory just needs to be a Func<string, Unit> - a lambda, a local function, or (as
-// here) a named method. 
-Unit CreateUnitFromText(string text)
+// ItemFactory just needs to be a Func<string, Unit, Unit> - a lambda, a local function, or
+// (as here) a named method. Nothing requires Unit to have a string constructor; build it
+// however your class actually needs to be built (lookups, defaults, validation, etc.). The
+// second parameter is the currently committed value (default(Unit) if nothing's selected
+// yet) - handy for e.g. copying fields from the previous selection into the new entry.
+Unit CreateUnitFromText(string text, Unit previous)
 {
-    return new Unit { Name = text, Hp = 10 };
+    return new Unit { Name = text, Hp = previous?.Hp ?? 10 };
 }
 ```
 
@@ -122,7 +125,8 @@ construction path instead (e.g. via `ItemFactory`).
 - `+` needs a way to construct a `T` from typed text. This is automatic for
   `string` and any primitive `T` (`int`, `float`, `bool`, etc. - detected via
   `Type.IsPrimitive`) - no callback required. For any other class, set
-  `ItemFactory` (`Func<string, T>`); if it's left null and `T` isn't
+  `ItemFactory` (`Func<string, T, T>` - text and the previously committed
+  value); if it's left null and `T` isn't
   string/primitive, the button stays hidden. `AllowAdd` (default `true`) is an
   extra on/off switch on top of that - set it `false` to hide `+` even when
   construction would otherwise be possible.
