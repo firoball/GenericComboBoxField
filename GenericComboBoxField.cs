@@ -6,14 +6,6 @@ using UnityEngine.UIElements;
 
 namespace UI.Controls
 {
-    /// <summary>Ordering applied to the popup list.</summary>
-    public enum ComboBoxSortMode
-    {
-        Default,
-        Ascending,
-        Descending
-    }
-
     /// <summary>
     /// Generic combo box control: text field with live-search dropdown against an IList&lt;T&gt;,
     /// plus optional Clear(x) / Add(+) / Remove(-) buttons to modify that list.
@@ -24,7 +16,7 @@ namespace UI.Controls
     /// subclass for your T and add [UxmlElement] to it - see ComboBoxField (T = string) for the
     /// reference implementation, including forwarded [UxmlAttribute] properties.
     /// </summary>
-    public partial class GenericComboBoxField<T> : VisualElement, INotifyValueChanged<T>
+    public partial class GenericComboBoxField<T> : VisualElement, INotifyValueChanged<T>, IGenericComboBoxField
     {
         private const string UssClassName = "combobox-field";
         private const string FieldWrapperUssClassName = UssClassName + "__field-wrapper";
@@ -86,6 +78,14 @@ namespace UI.Controls
         /// so a freshly-constructed control behaves exactly like a brief-only combo box.
         /// </summary>
         public bool AllowDetailMode { get; set; } = false;
+
+        /// <summary>
+        /// Casing applied to ToString() results when rendered: the closed text field's own
+        /// display text and brief-mode popup row labels. Purely cosmetic - search, full-match/
+        /// remove detection, and Add's trial construction always compare against the raw
+        /// ToString() result, so this never changes matching behavior. Default: Keep.
+        /// </summary>
+        public DisplayCasing DisplayCasing { get; set; } = DisplayCasing.Keep;
 
         /// <summary>
         /// Builds the row content shown for an entry while detail mode is active. If null (the
@@ -228,7 +228,7 @@ namespace UI.Controls
         {
             var previous = _value;
             _value = newValue;
-            _textField.SetValueWithoutNotify(LabelFor(newValue));
+            _textField.SetValueWithoutNotify(DisplayFor(newValue));
 
             BuildDisplayList();
             UpdateMatchState();
@@ -248,6 +248,29 @@ namespace UI.Controls
         // ---------------------------------------------------------------
 
         private static string LabelFor(T item) => item?.ToString() ?? string.Empty;
+
+        /// <summary>
+        /// The raw ToString() label, cased per DisplayCasing - used only where text is actually
+        /// rendered (text field display, brief-mode row labels). Never used for matching.
+        /// </summary>
+        private string DisplayFor(T item)
+        {
+            var raw = LabelFor(item);
+            return DisplayCasing switch
+            {
+                DisplayCasing.Uppercase => raw.ToUpperInvariant(),
+                DisplayCasing.Lowercase => raw.ToLowerInvariant(),
+                DisplayCasing.CapitalizeFirst => CapitalizeFirstInvariant(raw),
+                _ => raw
+            };
+        }
+
+        private static string CapitalizeFirstInvariant(string s)
+        {
+            if (string.IsNullOrEmpty(s))
+                return s;
+            return char.ToUpperInvariant(s[0]) + s.Substring(1);
+        }
 
         /// <summary>
         /// Tries to produce a T from typed text: a custom ItemFactory always wins; otherwise
@@ -326,11 +349,18 @@ namespace UI.Controls
         private bool HasFactoryCapability =>
             ItemFactory != null || typeof(T) == typeof(string) || typeof(T).IsPrimitive;
 
+        /// <summary>
+        /// True if Choices can't be mutated (e.g. a List&lt;T&gt;.AsReadOnly() or a plain T[] -
+        /// both implement IList&lt;T&gt; but throw NotSupportedException on Add/Remove). Add/
+        /// Remove are hidden entirely in that case rather than throwing on click.
+        /// </summary>
+        private bool IsChoicesReadOnly => _choices.IsReadOnly;
+
         /// <summary>Whether the typed text currently differs from the committed value's label - i.e. whether there's anything to revert to.</summary>
         private bool CanUndo()
         {
             var text = _textField.value ?? string.Empty;
-            return !string.Equals(text, LabelFor(_value), StringComparison.Ordinal);
+            return !string.Equals(text, DisplayFor(_value), StringComparison.Ordinal);
         }
 
         private void UpdateMatchState()
@@ -338,7 +368,9 @@ namespace UI.Controls
             var text = _textField.value ?? string.Empty;
             var isFullMatch = TryFindFullMatch(out _);
             var hasText = !string.IsNullOrEmpty(text);
-            var showAdd = AllowAdd && HasFactoryCapability;
+            var readOnly = IsChoicesReadOnly;
+            var showAdd = AllowAdd && HasFactoryCapability && !readOnly;
+            var showRemove = AllowDelete && !readOnly;
 
             _textField.EnableInClassList(MatchUssClassName, isFullMatch);
 
@@ -352,8 +384,8 @@ namespace UI.Controls
 
             _addButton.style.display = showAdd ? DisplayStyle.Flex : DisplayStyle.None;
             _addButton.SetEnabled(canAdd);
-            _removeButton.style.display = AllowDelete ? DisplayStyle.Flex : DisplayStyle.None;
-            _removeButton.SetEnabled(AllowDelete && isFullMatch);
+            _removeButton.style.display = showRemove ? DisplayStyle.Flex : DisplayStyle.None;
+            _removeButton.SetEnabled(showRemove && isFullMatch);
         }
 
         /// <summary>
@@ -363,7 +395,7 @@ namespace UI.Controls
         /// </summary>
         private void RevertText()
         {
-            _textField.SetValueWithoutNotify(LabelFor(_value));
+            _textField.SetValueWithoutNotify(DisplayFor(_value));
             BuildDisplayList();
             UpdateMatchState();
             if (_popupOpen)
@@ -534,7 +566,7 @@ namespace UI.Controls
                 }
                 else
                 {
-                    row = new Label(LabelFor(entry)) { focusable = true, tabIndex = 0 };
+                    row = new Label(DisplayFor(entry)) { focusable = true, tabIndex = 0 };
                     row.AddToClassList(RowUssClassName);
                 }
 
@@ -728,7 +760,7 @@ namespace UI.Controls
 
         private void OnAddClicked()
         {
-            if (!AllowAdd || !HasFactoryCapability) return;
+            if (!AllowAdd || !HasFactoryCapability || IsChoicesReadOnly) return;
 
             var text = _textField.value;
             if (string.IsNullOrEmpty(text)) return;
@@ -742,7 +774,7 @@ namespace UI.Controls
 
         private void OnRemoveClicked()
         {
-            if (!AllowDelete) return;
+            if (!AllowDelete || IsChoicesReadOnly) return;
             if (!TryFindFullMatch(out var matched)) return;
 
             _choices.Remove(matched);

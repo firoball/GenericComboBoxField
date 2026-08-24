@@ -13,13 +13,19 @@ Two classes:
 - **`ComboBoxField`** - `GenericComboBoxField<string>` with UI Builder / UXML
   support. Behaves exactly like a plain string combo box out of the box.
 
+Both implement **`IGenericComboBoxField`**, a non-generic interface covering
+everything that doesn't require knowing `T` (config, not `Choices`/`value`) -
+useful for holding a single reference to combos of different `T`, e.g.
+`IGenericComboBoxField[] allCombos`.
+
 ## Files
 
 - `GenericComboBoxField.cs`
 - `ComboBoxField.cs`
+- `IGenericComboBoxField.cs` (interface + the `DisplayCasing` enum)
 - `GenericComboBoxField.uss` (shared by both classes)
 
-Put all three in a UI Toolkit-capable folder (e.g. `Assets/UI/Controls/`).
+Put all four in a UI Toolkit-capable folder (e.g. `Assets/UI/Controls/`).
 The `.uss` needs to be referenced by your panel/UXML (`StyleSheets` in UXML,
 or `visualElement.styleSheets.Add(...)` in code).
 
@@ -98,6 +104,53 @@ publicly by design (a generic `T` can't represent "partial text"); if you
 need live text as the user types, wire a callback on the specific `T`
 construction path instead (e.g. via `ItemFactory`).
 
+## IGenericComboBoxField
+
+The non-generic config surface, implemented by both classes:
+
+```csharp
+public interface IGenericComboBoxField
+{
+    int VisibleRowCount { get; set; }
+    float MaxPopupHeight { get; set; }
+    bool AllowAdd { get; set; }
+    bool AllowDelete { get; set; }
+    ComboBoxSortMode Ordering { get; set; }
+    bool AllowDetailMode { get; set; }
+    DisplayCasing DisplayCasing { get; set; }
+    void Refresh();
+}
+```
+
+`Choices`, `value`, `ItemFactory`, and `DetailViewBuilder` aren't here - they're
+generic-typed and can't be represented without knowing `T`. This interface is
+for code that only needs to configure or inspect a combo box's *behavior*
+(e.g. a settings panel that lists every combo box on screen and lets you
+toggle `AllowDetailMode` on each), not read or write its selected value.
+
+## Display casing
+
+`DisplayCasing` (default `Keep`) cases the rendered `ToString()` text - the
+closed text field's own display and brief-mode popup row labels:
+
+```csharp
+public enum DisplayCasing { Keep, Uppercase, Lowercase, CapitalizeFirst }
+```
+
+Purely cosmetic - conversion is invariant-culture (`ToUpperInvariant`/
+`ToLowerInvariant`), and it never touches:
+
+- search/typing (still `StartsWith` on the raw `ToString()`, case-insensitive),
+- full-match / remove detection (still raw `ToString()`, case-insensitive),
+- Add's trial construction (still raw text as typed),
+- the underlying `T`/`value` itself.
+
+So a case-only variant is still recognized as the same entry (no accidental
+duplicate `+`) and still filters/selects correctly, regardless of what casing
+it's displayed in. Detail-mode rows are untouched - they're a user-supplied
+`VisualElement` built from the raw `T` instance, so apply (or ignore) casing
+yourself there if you want it.
+
 ## Detail mode
 
 - Off by default (`AllowDetailMode = false`) - no checkbox, brief rows only.
@@ -152,6 +205,15 @@ combo.Refresh();
 
 afterwards so filtering, sorting, and button states get recalculated.
 
+## Read-only Choices
+
+If `Choices` is a read-only `IList<T>` (e.g. `list.AsReadOnly()` or a plain
+`T[]` - both implement `IList<T>` but throw `NotSupportedException` on
+`Add`/`Remove`), `+` and `-` are hidden automatically (checked via
+`IList<T>.IsReadOnly`) instead of throwing when clicked. Useful when
+something else owns list housekeeping and the combo box should be
+selection/search-only.
+
 ## Layout
 
 - The text field, with the clear (x), undo (↺), and dropdown-toggle (▼) buttons
@@ -190,8 +252,10 @@ afterwards so filtering, sorting, and button states get recalculated.
 ## UI Builder / UXML
 
 Only the concrete `ComboBoxField` (T = string) supports UXML - `[UxmlElement]`
-requires a non-generic type. UXML attributes: `visible-row-count`, `allow-add`,
-`allow-delete`, `ordering` (`Default`/`Ascending`/`Descending`).
+requires a non-generic type. UXML attributes: `visible-row-count`,
+`max-popup-height`, `allow-delete`, `ordering`
+(`Default`/`Ascending`/`Descending`), `allow-detail-mode`, `display-casing`
+(`Keep`/`Uppercase`/`Lowercase`/`CapitalizeFirst`), `allow-add`.
 
 For UI Builder support with a specific `T`, derive your own concrete subclass
 of `GenericComboBoxField<YourType>` and add `[UxmlElement]` to it, following

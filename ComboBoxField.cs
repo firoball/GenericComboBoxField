@@ -12,20 +12,20 @@ namespace UI.Controls
     [UxmlElement]
     public partial class ComboBoxField : GenericComboBoxField<string>
     {
-        /// <summary>Whether the + button (add current text to list) is enabled at all.</summary>
-        [UxmlAttribute("allow-add")]
-        public new bool AllowAdd
-        {
-            get => base.AllowAdd;
-            set => base.AllowAdd = value;
-        }
-
         /// <summary>Number of visible rows in the popup before it scrolls.</summary>
         [UxmlAttribute("visible-row-count")]
         public new int VisibleRowCount
         {
             get => base.VisibleRowCount;
             set => base.VisibleRowCount = value;
+        }
+
+        /// <summary>Hard pixel cap on popup height, regardless of VisibleRowCount. &lt;= 0 disables it.</summary>
+        [UxmlAttribute("max-popup-height")]
+        public new float MaxPopupHeight
+        {
+            get => base.MaxPopupHeight;
+            set => base.MaxPopupHeight = value;
         }
 
         /// <summary>Whether the - button (remove current full match from list) is enabled at all.</summary>
@@ -42,6 +42,33 @@ namespace UI.Controls
         {
             get => base.Ordering;
             set => base.Ordering = value;
+        }
+
+        /// <summary>
+        /// Whether the detail-mode checkbox is allowed to show at all (still also requires
+        /// DetailViewBuilder to be set in code - delegates aren't UXML-settable).
+        /// </summary>
+        [UxmlAttribute("allow-detail-mode")]
+        public new bool AllowDetailMode
+        {
+            get => base.AllowDetailMode;
+            set => base.AllowDetailMode = value;
+        }
+
+        /// <summary>Casing applied to the rendered ToString() label - display only, never affects matching.</summary>
+        [UxmlAttribute("display-casing")]
+        public new DisplayCasing DisplayCasing
+        {
+            get => base.DisplayCasing;
+            set => base.DisplayCasing = value;
+        }
+
+        /// <summary>Whether the + button (add current text to list) is enabled at all.</summary>
+        [UxmlAttribute("allow-add")]
+        public new bool AllowAdd
+        {
+            get => base.AllowAdd;
+            set => base.AllowAdd = value;
         }
     }
 }
