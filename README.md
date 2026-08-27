@@ -23,11 +23,18 @@ useful for holding a single reference to combos of different `T`, e.g.
 - `GenericComboBoxField.cs`
 - `ComboBoxField.cs`
 - `IGenericComboBoxField.cs` (interface + the `DisplayCasing` enum)
+- `GenericComboBoxFieldStyle.cs` (stylesheet auto-loader)
 - `GenericComboBoxField.uss` (shared by both classes)
 
-Put all four in a UI Toolkit-capable folder (e.g. `Assets/UI/Controls/`).
-The `.uss` needs to be referenced by your panel/UXML (`StyleSheets` in UXML,
-or `visualElement.styleSheets.Add(...)` in code).
+Put the four `.cs` files in a UI Toolkit-capable folder (e.g.
+`Assets/UI/Controls/`). **The `.uss` must go under a `Resources` folder** -
+e.g. `Assets/Resources/UI/Controls/GenericComboBoxField.uss` - so the control
+can load it itself via `Resources.Load<StyleSheet>` at construction time. No
+manual `StyleSheets` wiring in UXML or `styleSheets.Add(...)` in code is
+needed (and doing it anyway is harmless - the control checks first and won't
+add its stylesheet twice). See "Automatic stylesheet loading" below if your
+project's `Resources` layout differs or you'd rather supply the `StyleSheet`
+yourself.
 
 ## `ComboBoxField` usage (string list)
 
@@ -118,15 +125,68 @@ public interface IGenericComboBoxField
     ComboBoxSortMode Ordering { get; set; }
     bool AllowDetailMode { get; set; }
     DisplayCasing DisplayCasing { get; set; }
+    Func<string, string> Sanitizer { get; set; }
     void Refresh();
 }
 ```
 
 `Choices`, `value`, `ItemFactory`, and `DetailViewBuilder` aren't here - they're
-generic-typed and can't be represented without knowing `T`. This interface is
+generic-typed and can't be represented without knowing `T`. `Sanitizer` *is*
+included despite being a delegate, since `Func<string, string>` doesn't
+reference `T` at all. This interface is
 for code that only needs to configure or inspect a combo box's *behavior*
 (e.g. a settings panel that lists every combo box on screen and lets you
 toggle `AllowDetailMode` on each), not read or write its selected value.
+
+## Automatic stylesheet loading
+
+Every `GenericComboBoxField<T>` adds its own stylesheet to itself on
+construction - it doesn't rely on whatever panel/UXML happens to create it.
+This matters when the combo box is nested inside another reusable component
+whose author didn't (or couldn't) expose USS wiring - without this, those
+instances would silently render unstyled.
+
+The loader (`GenericComboBoxFieldStyle`, a small static class - not
+`UnityEditor`-dependent, works identically in play mode, builds, and editor
+windows) resolves the stylesheet as:
+
+1. `GenericComboBoxFieldStyle.Override`, if you've assigned a `StyleSheet`
+   directly (e.g. loaded via Addressables, an AssetBundle, or built at
+   runtime) - checked fresh every time, always wins when set.
+2. Otherwise `Resources.Load<StyleSheet>(GenericComboBoxFieldStyle.ResourcePath)`,
+   default path `"UI/Controls/GenericComboBoxField"` - meaning the shipped
+   `.uss` needs to sit at `Assets/Resources/UI/Controls/GenericComboBoxField.uss`
+   (or wherever `ResourcePath` points, if you change it) for this to resolve.
+   Loaded and cached once for the whole app on first access, regardless of
+   how many different `T` you use `GenericComboBoxField<T>` with.
+
+If neither produces a `StyleSheet`, a `Debug.LogWarning` fires once (not once
+per instance) explaining where to place the file or how to override the path/
+supply the sheet directly - the control keeps working either way, just
+unstyled. If you change `ResourcePath` after the first control has already
+been constructed, call `GenericComboBoxFieldStyle.ResetCache()` to force a
+re-attempt; `Override` needs no such reset since it's re-checked every time.
+
+## Sanitizer
+
+`Sanitizer` (`Func<string, string>`, default `null`) cleans the text field's
+content right after each user edit, before it's treated as real input:
+
+```csharp
+combo.Sanitizer = raw => new string(raw.Where(char.IsLetterOrDigit).ToArray());
+```
+
+It receives the field's full current content (not a single keystroke - that's
+how the underlying `ChangeEvent<string>` reports edits) and, if the result
+differs, the field is immediately rewritten to the sanitized text before
+anything else runs. Everything downstream - live filtering, full-match/remove
+detection, Add's trial construction, Undo's divergence check - just keeps
+reading the text field as usual; by the time any of that runs, sanitization
+has already happened, so none of it needs special-casing.
+
+Only fires on genuine typing. Programmatic changes (a row pick, Undo,
+`SetValueWithoutNotify`, clicking Clear) never go through it - those are all
+already-known-good values, not raw keyboard input.
 
 ## Display casing
 
@@ -217,11 +277,33 @@ selection/search-only.
 ## Layout
 
 - The text field, with the clear (x), undo (↺), and dropdown-toggle (▼) buttons
-  embedded inside it, sits in one wrapper on the left; the + and - buttons sit
-  outside it, in that order.
-- The popup is constrained to the wrapper's width, so it never extends past the
-  text field under the outer +/- buttons. It's a column: the scrollable row
-  list on top, the optional detail-mode footer beneath it.
+  embedded inside it, sits in a fixed-height row on the left; the + and -
+  buttons sit outside that row, in that order.
+- The popup sits below that row, inside the same wrapper (so it's constrained
+  to the wrapper's width, never extending under the outer +/- buttons) - as a
+  normal in-flow block, not an absolutely positioned overlay. It's a column:
+  the scrollable row list on top, the optional detail-mode footer beneath it.
+
+## Popup layout: in-flow, not an overlay
+
+UI Toolkit has no `z-index` - paint order is strictly visual-tree traversal
+order, and `position: absolute` only affects layout, not paint order. Rather
+than fight that (reparenting to a top-level overlay, tracking the field's
+on-screen position, etc.), the popup is a **normal in-flow element**: opening
+it grows the control's own layout space and pushes whatever comes after it
+(in the same parent) down, instead of floating over other content. Closing it
+shrinks back down. Since nothing ever overlaps anything, there's no paint
+order to solve, and no position-tracking needed at all - the layout engine
+handles it like any other resizing element.
+
+Trade-off worth knowing: if this control sits inside a **scrollable list of
+many fields**, opening it will visibly shift every later field down (and back
+up on close) - more noticeable than a floating dropdown would be. If the
+control sits inside a **size-constrained ancestor** (fixed height, `overflow:
+hidden`), the popup can get clipped instead of properly showing all
+`VisibleRowCount` rows - it doesn't create its own space to grow into the way
+a floating overlay would. Neither applies to a single field in an otherwise
+normal-height layout.
 
 ## Behavior
 
@@ -239,6 +321,8 @@ selection/search-only.
   - Up/Down (while typing or while a popup row is focused): opens the popup if
     closed, moves the highlighted/selected row, scrolls it into view, and moves
     keyboard focus onto that row.
+  - Home/End: jumps to the first/last entry. PageUp/PageDown: moves by
+    `VisibleRowCount` rows. Same open/scroll/focus behavior as Up/Down.
   - Left/Right (while a popup row has focus): moves focus back to the text field.
   - Enter: selects the highlighted row.
   - Escape: progressive. If the typed text differs from the committed value's

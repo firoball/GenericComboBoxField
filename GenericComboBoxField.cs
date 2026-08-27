@@ -20,6 +20,7 @@ namespace UI.Controls
     {
         private const string UssClassName = "combobox-field";
         private const string FieldWrapperUssClassName = UssClassName + "__field-wrapper";
+        private const string FieldRowUssClassName = UssClassName + "__field-row";
         private const string TextFieldUssClassName = UssClassName + "__text-field";
         private const string InlineButtonsUssClassName = UssClassName + "__inline-buttons";
         private const string ClearButtonUssClassName = UssClassName + "__clear-button";
@@ -37,6 +38,7 @@ namespace UI.Controls
         private const string DetailToggleUssClassName = UssClassName + "__detail-toggle";
 
         private readonly VisualElement _fieldWrapper;
+        private readonly VisualElement _fieldRow;
         private readonly TextField _textField;
         private readonly Button _clearButton;
         private readonly Button _undoButton;
@@ -112,6 +114,21 @@ namespace UI.Controls
         public Func<string, T, T> ItemFactory { get; set; }
 
         /// <summary>
+        /// Sanitizes the text field's content after each user edit, before it becomes part of
+        /// the combo box's actual input: receives the full current field content (not a single
+        /// character - that's how ChangeEvent&lt;string&gt; reports edits), and if the result
+        /// differs, the field is rewritten to the sanitized result immediately (via
+        /// SetValueWithoutNotify) before anything else sees it. Filtering, full-match/remove
+        /// detection, Add's trial construction, and Undo's divergence check all simply keep
+        /// reading the text field's own content as usual - by the time they run it's already
+        /// sanitized, so none of them need special-casing. Not generic-typed (no T involved),
+        /// so it's also exposed on IGenericComboBoxField. Never invoked for programmatic changes
+        /// (undo/revert/selection all use SetValueWithoutNotify, which doesn't fire this).
+        /// Default: null (no sanitization).
+        /// </summary>
+        public Func<string, string> Sanitizer { get; set; }
+
+        /// <summary>
         /// The data list this control searches/edits. Assign a reference; if the underlying
         /// data can change externally (e.g. behind an interface), call Refresh() after changes.
         /// </summary>
@@ -137,10 +154,26 @@ namespace UI.Controls
             AddToClassList(UssClassName);
             style.flexDirection = FlexDirection.Row;
 
-            // Wrapper holds the text field plus the X/arrow buttons embedded inside it,
-            // and defines the width the popup is constrained to (see PopupUssClassName in USS).
+            // Self-contained by design: adds its own stylesheet rather than relying on whatever
+            // panel/UXML happens to instantiate it - avoids silently-unstyled instances when
+            // this control is nested inside another component that doesn't expose USS wiring.
+            // See GenericComboBoxFieldStyle for the loading/override/fallback behavior.
+            var sharedStyleSheet = GenericComboBoxFieldStyle.Shared;
+            if (sharedStyleSheet != null && !styleSheets.Contains(sharedStyleSheet))
+                styleSheets.Add(sharedStyleSheet);
+
+            // Wrapper is now a column: a fixed-height row (text field + embedded buttons) on
+            // top, the popup below it as a normal in-flow sibling - not an absolutely-positioned
+            // overlay. This means opening the popup grows this control's own layout space
+            // (pushing later content down) instead of floating over whatever else is on screen,
+            // which sidesteps UI Toolkit's lack of z-index entirely: nothing ever overlaps
+            // anything, so there's no paint-order problem to solve, and no need to track the
+            // field's position while open (no polling, no reparenting).
             _fieldWrapper = new VisualElement();
             _fieldWrapper.AddToClassList(FieldWrapperUssClassName);
+
+            _fieldRow = new VisualElement();
+            _fieldRow.AddToClassList(FieldRowUssClassName);
 
             _textField = new TextField { isDelayed = false };
             _textField.AddToClassList(TextFieldUssClassName);
@@ -161,11 +194,12 @@ namespace UI.Controls
             inlineButtons.Add(_undoButton);
             inlineButtons.Add(_arrowButton);
 
-            _fieldWrapper.Add(_textField);
-            _fieldWrapper.Add(inlineButtons);
+            _fieldRow.Add(_textField);
+            _fieldRow.Add(inlineButtons);
+            _fieldWrapper.Add(_fieldRow);
 
-            // Popup container: absolutely positioned against the field wrapper (see USS), holds
-            // the scrollable row list plus an optional detail-mode footer beneath it.
+            // Popup container: a normal in-flow block below _fieldRow, holding the scrollable
+            // row list plus an optional detail-mode footer beneath it.
             _popupContainer = new VisualElement();
             _popupContainer.AddToClassList(PopupUssClassName);
             _popupContainer.style.display = DisplayStyle.None;
@@ -316,6 +350,13 @@ namespace UI.Controls
         /// </summary>
         private void OnTextChanged(ChangeEvent<string> evt)
         {
+            if (Sanitizer != null)
+            {
+                var sanitized = Sanitizer(evt.newValue ?? string.Empty) ?? string.Empty;
+                if (!string.Equals(sanitized, evt.newValue, StringComparison.Ordinal))
+                    _textField.SetValueWithoutNotify(sanitized);
+            }
+
             BuildDisplayList();
             UpdateMatchState();
 
@@ -700,6 +741,26 @@ namespace UI.Controls
                     MoveHighlight(-1, focusRow: true);
                     evt.StopPropagation();
                     break;
+                case KeyCode.Home:
+                    if (!_popupOpen) OpenPopup();
+                    JumpHighlight(0, focusRow: true);
+                    evt.StopPropagation();
+                    break;
+                case KeyCode.End:
+                    if (!_popupOpen) OpenPopup();
+                    JumpHighlight(_displayList.Count - 1, focusRow: true);
+                    evt.StopPropagation();
+                    break;
+                case KeyCode.PageUp:
+                    if (!_popupOpen) OpenPopup();
+                    MoveHighlight(-VisibleRowCount, focusRow: true);
+                    evt.StopPropagation();
+                    break;
+                case KeyCode.PageDown:
+                    if (!_popupOpen) OpenPopup();
+                    MoveHighlight(VisibleRowCount, focusRow: true);
+                    evt.StopPropagation();
+                    break;
                 case KeyCode.LeftArrow:
                 case KeyCode.RightArrow:
                 case KeyCode.Backspace:
@@ -742,7 +803,13 @@ namespace UI.Controls
         {
             if (_displayList.Count == 0) return;
             var next = _highlightedIndex < 0 ? 0 : _highlightedIndex + delta;
-            next = Mathf.Clamp(next, 0, _displayList.Count - 1);
+            JumpHighlight(next, focusRow);
+        }
+
+        private void JumpHighlight(int index, bool focusRow = false)
+        {
+            if (_displayList.Count == 0) return;
+            var next = Mathf.Clamp(index, 0, _displayList.Count - 1);
             SetHighlighted(next);
 
             var rows = _scrollView.Children().ToList();

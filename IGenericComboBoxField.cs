@@ -1,3 +1,5 @@
+using System;
+
 namespace UI.Controls
 {
     /// <summary>
@@ -41,6 +43,7 @@ namespace UI.Controls
         ComboBoxSortMode Ordering { get; set; }
         bool AllowDetailMode { get; set; }
         DisplayCasing DisplayCasing { get; set; }
+        Func<string, string> Sanitizer { get; set; }
 
         void Refresh();
     }
