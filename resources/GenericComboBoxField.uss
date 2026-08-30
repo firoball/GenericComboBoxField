@@ -1,0 +1,155 @@
+.combobox-field {
+    flex-direction: row;
+    align-items: flex-start;
+}
+
+.combobox-field__field-wrapper {
+    flex-direction: column;
+    flex-grow: 1;
+}
+
+.combobox-field__field-row {
+    position: relative;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.combobox-field__text-field {
+    flex-grow: 1;
+    margin: 0;
+    height: 100%;
+}
+
+.combobox-field__text-field > .unity-text-field__input {
+    background-color: rgb(42, 42, 42);
+    border-color: rgb(35, 35, 35);
+    border-width: 1px;
+    border-radius: 3px;
+    color: rgb(210, 210, 210);
+    /* Reserve space on the right so text doesn't run under the embedded X/undo/arrow buttons. */
+    padding-right: 60px;
+}
+
+/* Full match: bold text + a slightly lighter neutral background, no color coding. */
+.combobox-field__text-field--match > .unity-text-field__input {
+    background-color: rgb(64, 64, 64);
+    -unity-font-style: bold;
+}
+
+.combobox-field__inline-buttons {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: 2px;
+    flex-direction: row;
+    align-items: center;
+}
+
+.combobox-field__clear-button,
+.combobox-field__undo-button,
+.combobox-field__arrow-button {
+    width: 18px;
+    height: 18px;
+    margin: 0 1px;
+    padding: 0;
+    border-width: 0;
+    background-color: rgba(0, 0, 0, 0);
+    color: rgb(180, 180, 180);
+    font-size: 13px;
+    -unity-text-align: middle-center;
+}
+
+/* The ▼ glyph is a filled shape and reads noticeably larger than ✕/↺ at the
+   same font-size - scale it down on its own rather than shrinking all three. */
+.combobox-field__arrow-button {
+    font-size: 9px;
+}
+
+.combobox-field__clear-button:hover,
+.combobox-field__undo-button:hover,
+.combobox-field__arrow-button:hover {
+    color: rgb(230, 230, 230);
+}
+
+.combobox-field__clear-button:disabled,
+.combobox-field__undo-button:disabled,
+.combobox-field__arrow-button:disabled {
+    color: rgb(90, 90, 90);
+}
+
+.combobox-field__add-button,
+.combobox-field__remove-button {
+    width: 18px;
+    height: 18px;
+    margin: 0 0 0 2px;
+    padding: 0;
+    border-radius: 3px;
+    border-width: 1px;
+    border-color: rgb(35, 35, 35);
+    background-color: rgb(60, 60, 60);
+    color: rgb(210, 210, 210);
+    font-size: 10px;
+    -unity-text-align: middle-center;
+}
+
+.combobox-field__add-button:hover,
+.combobox-field__remove-button:hover {
+    background-color: rgb(75, 75, 75);
+}
+
+.combobox-field__add-button:disabled,
+.combobox-field__remove-button:disabled {
+    background-color: rgb(50, 50, 50);
+    color: rgb(120, 120, 120);
+}
+
+/* Popup is a normal in-flow child of field-wrapper (below field-row), not an absolutely
+   positioned overlay - opening it grows this control's own layout space instead of floating
+   over other content, so there's nothing to paint above and no position tracking needed. It's
+   a column: the scrollable row list on top, an optional detail-mode footer beneath it. */
+.combobox-field__popup {
+    flex-direction: column;
+    background-color: rgb(56, 56, 56);
+    border-width: 1px;
+    border-color: rgb(35, 35, 35);
+    border-radius: 3px;
+}
+
+.combobox-field__popup-list {
+    flex-grow: 0;
+}
+
+.combobox-field__row {
+    height: 20px;
+    padding: 2px 4px;
+    -unity-text-align: middle-left;
+    color: rgb(210, 210, 210);
+}
+
+.combobox-field__row--highlighted {
+    background-color: rgb(62, 95, 150);
+    color: rgb(255, 255, 255);
+}
+
+/* Detail rows hold a user-supplied VisualElement instead of a single text line, so height
+   is driven by content rather than the fixed brief-row height above. */
+.combobox-field__row--detail {
+    height: auto;
+    min-height: 28px;
+    padding: 4px;
+}
+
+.combobox-field__detail-footer {
+    flex-direction: row;
+    align-items: center;
+    padding: 3px 4px;
+    border-top-width: 1px;
+    border-top-color: rgb(35, 35, 35);
+    background-color: rgb(48, 48, 48);
+}
+
+.combobox-field__detail-toggle {
+    margin: 0;
+    font-size: 10px;
+    color: rgb(190, 190, 190);
+}
