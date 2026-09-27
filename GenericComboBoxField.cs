@@ -572,7 +572,9 @@ namespace UI.Controls
         private void BuildDisplayList()
         {
             var text = _textField.value ?? string.Empty;
-            IEnumerable<T> filtered = string.IsNullOrEmpty(text)
+            var isFullMatch = TryFindFullMatch(out _);
+            
+            IEnumerable<T> filtered = string.IsNullOrEmpty(text) || isFullMatch
                 ? _choices
                 : _choices.Where(e => LabelFor(e).StartsWith(text, StringComparison.OrdinalIgnoreCase));
 
