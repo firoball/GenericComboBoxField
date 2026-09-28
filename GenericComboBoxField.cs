@@ -58,9 +58,17 @@ namespace UI.Controls
         private bool _detailMode;
         private float _measuredBriefRowHeight = -1f;
         private float _measuredDetailRowHeight = -1f;
+        private bool _suppressFocusOutClose;
 
         /// <summary>Number of visible rows in the popup before it scrolls.</summary>
         public int VisibleRowCount { get; set; } = 6;
+
+        /// <summary>
+        /// Visible row count while detail mode is active. Null (default) falls back to
+        /// VisibleRowCount, so brief and detail mode show the same number of rows unless
+        /// this is explicitly set.
+        /// </summary>
+        public int? DetailVisibleRowCount { get; set; } = null;
 
         /// <summary>
         /// Hard pixel cap on popup height, regardless of VisibleRowCount or row mode.
@@ -97,34 +105,25 @@ namespace UI.Controls
 
         /// <summary>
         /// Whether the + button (add current text to list) is enabled at all. Combined with
-        /// ItemFactory / the built-in string-and-primitive fallback below (see CanConstructFromText).
+        /// ItemFactory / the built-in string-and-primitive fallback (see TryCreateFromText).
         /// </summary>
         public bool AllowAdd { get; set; } = true;
 
         /// <summary>
-        /// Constructs a new T instance from typed text for the Add(+) button. Args: the typed
-        /// text, and the currently committed value (default(T) if nothing's selected yet) - the
-        /// latter is handed in explicitly since there's no reference to the control itself
-        /// available at the point this is normally wired up (e.g. an object initializer).
-        /// Optional: if left null, string and primitive T (int, float, bool, etc.) are handled
-        /// automatically - no callback needed for those. For any other T, the Add button stays
-        /// hidden until a factory is supplied here, since constructing an arbitrary class from
-        /// text isn't possible in general.
+        /// Builds a new T from typed text for the Add(+) button: (text, previousValue) => T,
+        /// where previousValue is the currently committed value (default(T) if none). Optional -
+        /// string and primitive T (int, float, bool, ...) are constructed automatically without
+        /// one. For any other T, Add stays hidden until a factory is supplied.
         /// </summary>
         public Func<string, T, T> ItemFactory { get; set; }
 
         /// <summary>
-        /// Sanitizes the text field's content after each user edit, before it becomes part of
-        /// the combo box's actual input: receives the full current field content (not a single
-        /// character - that's how ChangeEvent&lt;string&gt; reports edits), and if the result
-        /// differs, the field is rewritten to the sanitized result immediately (via
-        /// SetValueWithoutNotify) before anything else sees it. Filtering, full-match/remove
-        /// detection, Add's trial construction, and Undo's divergence check all simply keep
-        /// reading the text field's own content as usual - by the time they run it's already
-        /// sanitized, so none of them need special-casing. Not generic-typed (no T involved),
-        /// so it's also exposed on IGenericComboBoxField. Never invoked for programmatic changes
-        /// (undo/revert/selection all use SetValueWithoutNotify, which doesn't fire this).
-        /// Default: null (no sanitization).
+        /// Cleans the text field's content after each user edit, before anything else reads it:
+        /// if the sanitized result differs from what was typed, the field is rewritten
+        /// immediately via SetValueWithoutNotify, so filtering/matching/Add/Undo all see the
+        /// sanitized text. Not generic-typed, so it's also exposed on IGenericComboBoxField.
+        /// Never invoked for programmatic changes (undo, selection, etc. use
+        /// SetValueWithoutNotify, which doesn't fire this). Default: null (no sanitization).
         /// </summary>
         public Func<string, string> Sanitizer { get; set; }
 
@@ -149,26 +148,24 @@ namespace UI.Controls
             set => SetValueInternal(value, notify: true);
         }
 
+        /// <summary>
+        /// Creates a combo box with default settings (brief mode, Add/Delete both on, no
+        /// factory/sanitizer/detail builder). Configure via the properties above, then assign
+        /// Choices. Adds its own stylesheet on construction - see GenericComboBoxFieldStyle.
+        /// </summary>
         public GenericComboBoxField()
         {
             AddToClassList(UssClassName);
             style.flexDirection = FlexDirection.Row;
 
-            // Self-contained by design: adds its own stylesheet rather than relying on whatever
-            // panel/UXML happens to instantiate it - avoids silently-unstyled instances when
-            // this control is nested inside another component that doesn't expose USS wiring.
-            // See GenericComboBoxFieldStyle for the loading/override/fallback behavior.
             var sharedStyleSheet = GenericComboBoxFieldStyle.Shared;
             if (sharedStyleSheet != null && !styleSheets.Contains(sharedStyleSheet))
                 styleSheets.Add(sharedStyleSheet);
 
-            // Wrapper is now a column: a fixed-height row (text field + embedded buttons) on
-            // top, the popup below it as a normal in-flow sibling - not an absolutely-positioned
-            // overlay. This means opening the popup grows this control's own layout space
-            // (pushing later content down) instead of floating over whatever else is on screen,
-            // which sidesteps UI Toolkit's lack of z-index entirely: nothing ever overlaps
-            // anything, so there's no paint-order problem to solve, and no need to track the
-            // field's position while open (no polling, no reparenting).
+            // Column layout: a fixed-height row (text field + embedded buttons) on top, the
+            // popup below it as a normal in-flow sibling rather than an absolutely-positioned
+            // overlay. Opening the popup grows this control's own layout space instead of
+            // floating over other content, which avoids UI Toolkit's lack of z-index entirely.
             _fieldWrapper = new VisualElement();
             _fieldWrapper.AddToClassList(FieldWrapperUssClassName);
 
@@ -204,6 +201,21 @@ namespace UI.Controls
             _popupContainer.AddToClassList(PopupUssClassName);
             _popupContainer.style.display = DisplayStyle.None;
             _popupContainer.pickingMode = PickingMode.Position;
+            // Low-level scroller parts (step arrows, drag thumb) aren't focusable, so a click
+            // there blurs the text field without focusing anything else - which would otherwise
+            // (a) make the focus-out check below treat it as a click outside the control and
+            // close the popup, and (b) leave arrow-key navigation dead until the user clicks back
+            // into the text field. Rows and the detail toggle already claim focus on their own
+            // click, so the refocus call below is a no-op for those.
+            // Known limitation: the scroller's step-arrow buttons (Unity's RepeatButton, which
+            // auto-repeats on its own timer while held) can still drop focus during a held
+            // click - releasing, or using the thumb/track instead, recovers it immediately.
+            _popupContainer.RegisterCallback<PointerDownEvent>(_ =>
+            {
+                _suppressFocusOutClose = true;
+                RefocusIfNothingFocused();
+            }, TrickleDown.TrickleDown);
+            _popupContainer.RegisterCallback<PointerUpEvent>(_ => RefocusIfNothingFocused(), TrickleDown.TrickleDown);
 
             _scrollView = new ScrollView(ScrollViewMode.Vertical);
             _scrollView.AddToClassList(PopupListUssClassName);
@@ -253,6 +265,7 @@ namespace UI.Controls
             UpdateMatchState();
         }
 
+        /// <summary>Sets the value without firing ChangeEvent&lt;T&gt;.</summary>
         public void SetValueWithoutNotify(T newValue)
         {
             SetValueInternal(newValue, notify: false);
@@ -513,6 +526,12 @@ namespace UI.Controls
             // Delay so a click on a row/button/toggle inside this control isn't treated as "outside".
             schedule.Execute(() =>
             {
+                if (_suppressFocusOutClose)
+                {
+                    _suppressFocusOutClose = false;
+                    return;
+                }
+
                 if (_popupOpen && !ContainsFocusedElement())
                     ClosePopup();
             });
@@ -536,6 +555,11 @@ namespace UI.Controls
         private void OnDetailModeChanged(ChangeEvent<bool> evt)
         {
             _detailMode = CanShowDetailToggle && evt.newValue;
+
+            // Refocusing the text field clears the toggle's own lingering focus ring and keeps
+            // arrow-key navigation alive (see the popup pointer-down handler above for why
+            // leaving nothing focused breaks it).
+            FocusTextFieldDeferred();
 
             if (!_popupOpen)
                 return;
@@ -573,7 +597,10 @@ namespace UI.Controls
         {
             var text = _textField.value ?? string.Empty;
             var isFullMatch = TryFindFullMatch(out _);
-            
+
+            // A full match relaxes the filter to the whole list, not just the matching entry,
+            // so the user can still browse to a different existing entry after typing one out
+            // completely, instead of being stuck with a single-row (or empty) popup.
             IEnumerable<T> filtered = string.IsNullOrEmpty(text) || isFullMatch
                 ? _choices
                 : _choices.Where(e => LabelFor(e).StartsWith(text, StringComparison.OrdinalIgnoreCase));
@@ -615,7 +642,8 @@ namespace UI.Controls
 
                 var index = i;
                 row.RegisterCallback<MouseDownEvent>(_ => SelectEntry(_displayList[index]));
-                row.RegisterCallback<MouseEnterEvent>(_ => SetHighlighted(index));
+                // Hover is a pure CSS :hover effect (see .combobox-field__row:hover) - it never
+                // touches _highlightedIndex, which is reserved for keyboard nav and selection.
                 _scrollView.Add(row);
             }
 
@@ -664,7 +692,8 @@ namespace UI.Controls
 
         private void SetScrollViewMaxHeight(float rowHeight)
         {
-            var target = VisibleRowCount * rowHeight;
+            var rowCount = _detailMode ? (DetailVisibleRowCount ?? VisibleRowCount) : VisibleRowCount;
+            var target = rowCount * rowHeight;
             if (MaxPopupHeight > 0f)
                 target = Mathf.Min(target, MaxPopupHeight);
             _scrollView.style.maxHeight = target;
@@ -715,6 +744,21 @@ namespace UI.Controls
         private void FocusTextFieldDeferred()
         {
             schedule.Execute(() => _textField.Focus());
+        }
+
+        /// <summary>
+        /// Refocuses the text field, but only if nothing is currently focused - used after
+        /// interactions with non-focusable popup parts (scrollbar step buttons/thumb) that can
+        /// blur without any replacement, unlike row/toggle clicks which always claim focus
+        /// themselves. Deferred, same reasoning as FocusTextFieldDeferred.
+        /// </summary>
+        private void RefocusIfNothingFocused()
+        {
+            schedule.Execute(() =>
+            {
+                if (panel?.focusController?.focusedElement == null)
+                    _textField.Focus();
+            });
         }
 
         // ---------------------------------------------------------------
@@ -804,8 +848,64 @@ namespace UI.Controls
         private void MoveHighlight(int delta, bool focusRow = false)
         {
             if (_displayList.Count == 0) return;
-            var next = _highlightedIndex < 0 ? 0 : _highlightedIndex + delta;
+
+            int next;
+            if (_highlightedIndex < 0)
+            {
+                next = 0;
+            }
+            else if (!IsRowVisible(_highlightedIndex))
+            {
+                // Mouse wheel/scrollbar never move _highlightedIndex, so it can end up scrolled
+                // out of view. Bring it back at whichever edge is nearest to where it actually
+                // is - top if it's above the viewport, bottom if below - regardless of which key
+                // was pressed; a later press then continues normally from there.
+                var (first, last) = VisibleRowRange();
+                next = _highlightedIndex < first ? first : last;
+            }
+            else
+            {
+                next = _highlightedIndex + delta;
+            }
+
             JumpHighlight(next, focusRow);
+        }
+
+        /// <summary>True if the row at index currently intersects the scroll view's viewport.</summary>
+        private bool IsRowVisible(int index)
+        {
+            var rows = _scrollView.Children().ToList();
+            if (index < 0 || index >= rows.Count)
+                return false;
+
+            var scrollY = _scrollView.scrollOffset.y;
+            var viewportHeight = _scrollView.contentViewport.layout.height;
+            var row = rows[index];
+            var rowTop = row.layout.y;
+            var rowBottom = rowTop + row.layout.height;
+
+            return rowBottom > scrollY && rowTop < scrollY + viewportHeight;
+        }
+
+        /// <summary>The index range of rows currently intersecting the scroll view's viewport.</summary>
+        private (int first, int last) VisibleRowRange()
+        {
+            var rows = _scrollView.Children().ToList();
+            if (rows.Count == 0)
+                return (0, 0);
+
+            var scrollY = _scrollView.scrollOffset.y;
+            var viewportHeight = _scrollView.contentViewport.layout.height;
+
+            var first = 0;
+            while (first < rows.Count - 1 && rows[first].layout.y + rows[first].layout.height <= scrollY)
+                first++;
+
+            var last = rows.Count - 1;
+            while (last > first && rows[last].layout.y >= scrollY + viewportHeight)
+                last--;
+
+            return (first, last);
         }
 
         private void JumpHighlight(int index, bool focusRow = false)

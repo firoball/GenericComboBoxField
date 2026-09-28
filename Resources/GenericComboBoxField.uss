@@ -131,6 +131,19 @@
     color: rgb(255, 255, 255);
 }
 
+/* Pure CSS mouse-hover feedback - deliberately separate from --highlighted (keyboard nav /
+   selection state), and a distinct shade so the two are visually distinguishable. */
+.combobox-field__row:hover {
+    background-color: rgb(72, 72, 72);
+}
+
+/* When the mouse hovers the keyboard-highlighted row, blend into a lighter shade of the
+   highlight blue instead of letting the plain hover gray override it. */
+.combobox-field__row--highlighted:hover {
+    background-color: rgb(88, 122, 178);
+    color: rgb(255, 255, 255);
+}
+
 /* Detail rows hold a user-supplied VisualElement instead of a single text line, so height
    is driven by content rather than the fixed brief-row height above. */
 .combobox-field__row--detail {

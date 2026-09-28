@@ -37,6 +37,7 @@ namespace UI.Controls
     public interface IGenericComboBoxField
     {
         int VisibleRowCount { get; set; }
+        int? DetailVisibleRowCount { get; set; }
         float MaxPopupHeight { get; set; }
         bool AllowAdd { get; set; }
         bool AllowDelete { get; set; }
