@@ -119,6 +119,7 @@ The non-generic config surface, implemented by both classes:
 public interface IGenericComboBoxField
 {
     int VisibleRowCount { get; set; }
+    int? DetailVisibleRowCount { get; set; }
     float MaxPopupHeight { get; set; }
     bool AllowAdd { get; set; }
     bool AllowDelete { get; set; }
@@ -223,7 +224,10 @@ yourself there if you want it.
   Toggling it switches all popup rows between the brief `ToString()` label
   and whatever `DetailViewBuilder` returns.
 - Popup height: `VisibleRowCount` rows at the *current* mode's row height,
-  capped by `MaxPopupHeight` (hard limit, `<= 0` disables it). Brief and
+  capped by `MaxPopupHeight` (hard limit, `<= 0` disables it). Set
+  `DetailVisibleRowCount` to show a different row count while detail mode is
+  active - it defaults to `null`, which falls back to `VisibleRowCount`, so
+  brief and detail mode show the same count unless you override it. Brief and
   detail row heights are measured and cached independently, since detail rows
   are typically taller. Switching modes re-lays out instantly (no animation)
   and re-anchors the scroll position to the row that was highlighted (or the
