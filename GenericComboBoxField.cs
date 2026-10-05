@@ -601,7 +601,8 @@ namespace UI.Controls
                 return;
 
             SetHighlighted(idx);
-            ScrollRowIntoView(idx);
+            _pendingScrollIndex = idx;
+            TryApplyPendingScroll();
         }
 
         // ---------------------------------------------------------------
@@ -758,7 +759,13 @@ namespace UI.Controls
 
             var row = _scrollView[index];
             var viewportHeight = _scrollView.contentViewport.layout.height;
-            if (row.layout.height <= 0f || viewportHeight <= 0f || viewportHeight > _appliedMaxHeight + 0.5f)
+            if (row.layout.height <= 0f || viewportHeight <= 0f)
+                return;
+
+            // The viewport must have reached its final size: the applied max height, or the
+            // content height if that is smaller.
+            var expectedHeight = Mathf.Min(_appliedMaxHeight, _scrollView.contentContainer.layout.height);
+            if (Mathf.Abs(viewportHeight - expectedHeight) > 1f)
                 return;
 
             _pendingScrollIndex = -1;
