@@ -54,6 +54,11 @@ namespace UI.Controls
         private List<T> _displayList = new List<T>();
         private T _value;
         private int _highlightedIndex = -1;
+
+        // One-shot scroll target, applied as soon as row layout and popup max height are resolved.
+        private int _pendingScrollIndex = -1;
+        private bool _maxHeightApplied;
+        private float _appliedMaxHeight;
         private bool _popupOpen;
         private bool _detailMode;
         private float _measuredBriefRowHeight = -1f;
@@ -221,8 +226,10 @@ namespace UI.Controls
             _scrollView.AddToClassList(PopupListUssClassName);
             _scrollView.pickingMode = PickingMode.Position;
             _popupContainer.Add(_scrollView);
+            _scrollView.contentViewport.RegisterCallback<GeometryChangedEvent>(_ => TryApplyPendingScroll());
+            _scrollView.contentContainer.RegisterCallback<GeometryChangedEvent>(_ => TryApplyPendingScroll());
 
-            _detailToggle = new Toggle("Details");
+            _detailToggle =new Toggle("Details");
             _detailToggle.AddToClassList(DetailToggleUssClassName);
             _detailToggle.RegisterValueChangedCallback(OnDetailModeChanged);
 
@@ -380,7 +387,7 @@ namespace UI.Controls
             else
             {
                 BuildScrollViewRows();
-                ScrollToFirstMatch();
+                HighlightBestMatch();
             }
         }
 
@@ -455,7 +462,7 @@ namespace UI.Controls
             if (_popupOpen)
             {
                 BuildScrollViewRows();
-                ScrollToFirstMatch();
+                HighlightBestMatch();
             }
         }
 
@@ -482,9 +489,18 @@ namespace UI.Controls
         private void OnArrowClicked()
         {
             if (_popupOpen)
+            {
                 ClosePopup();
+            }
             else
+            {
                 OpenPopup();
+                // The click leaves keyboard focus on this button (Buttons are focusable), not
+                // the text field - unlike opening via Up/Down, which never moves focus away
+                // from it in the first place. Without this, Left/Right/Backspace and further
+                // typing have nothing focused to act on.
+                FocusTextFieldDeferred();
+            }
         }
 
         /// <summary>
@@ -511,12 +527,13 @@ namespace UI.Controls
             BuildDisplayList();
             BuildScrollViewRows();
             _popupContainer.style.display = DisplayStyle.Flex;
-            ScrollToFirstMatch();
+            HighlightBestMatch();
         }
 
         private void ClosePopup()
         {
             _popupOpen = false;
+            _pendingScrollIndex = -1;
             _popupContainer.style.display = DisplayStyle.None;
             _highlightedIndex = -1;
         }
@@ -584,9 +601,7 @@ namespace UI.Controls
                 return;
 
             SetHighlighted(idx);
-            var rows = _scrollView.Children().ToList();
-            if (idx < rows.Count)
-                _scrollView.ScrollTo(rows[idx]);
+            ScrollRowIntoView(idx);
         }
 
         // ---------------------------------------------------------------
@@ -617,6 +632,8 @@ namespace UI.Controls
         {
             _scrollView.Clear();
             _highlightedIndex = -1;
+            _pendingScrollIndex = -1;
+            _maxHeightApplied = false;
 
             var useDetail = _detailMode && DetailViewBuilder != null;
 
@@ -697,22 +714,59 @@ namespace UI.Controls
             if (MaxPopupHeight > 0f)
                 target = Mathf.Min(target, MaxPopupHeight);
             _scrollView.style.maxHeight = target;
+            _appliedMaxHeight = target;
+            _maxHeightApplied = true;
+            TryApplyPendingScroll();
         }
 
-        private void ScrollToFirstMatch()
+        /// <summary>
+        /// Highlights and reveals the entry best matching the text: an exact (case-insensitive)
+        /// match first, otherwise the first prefix match, otherwise the first row.
+        /// </summary>
+        private void HighlightBestMatch()
         {
             var text = _textField.value ?? string.Empty;
             if (string.IsNullOrEmpty(text) || _displayList.Count == 0)
                 return;
 
-            var idx = _displayList.FindIndex(e => LabelFor(e).StartsWith(text, StringComparison.OrdinalIgnoreCase));
+            var idx = _displayList.FindIndex(e => string.Equals(LabelFor(e), text, StringComparison.OrdinalIgnoreCase));
+            if (idx < 0)
+                idx = _displayList.FindIndex(e => LabelFor(e).StartsWith(text, StringComparison.OrdinalIgnoreCase));
             if (idx < 0) idx = 0;
-            SetHighlighted(idx);
 
-            var rows = _scrollView.Children().ToList();
-            if (idx >= 0 && idx < rows.Count)
-                _scrollView.ScrollTo(rows[idx]);
+            SetHighlighted(idx);
+            _pendingScrollIndex = idx;
+            TryApplyPendingScroll();
         }
+
+        /// <summary>
+        /// Applies the pending scroll once layout is usable (rows measured, viewport sized to the
+        /// final max height), then clears it. Runs once only and never re-asserts afterwards,
+        /// so later wheel/scrollbar scrolling is unaffected.
+        /// </summary>
+        private void TryApplyPendingScroll()
+        {
+            if (_pendingScrollIndex < 0 || !_popupOpen || !_maxHeightApplied)
+                return;
+
+            var index = _pendingScrollIndex;
+            if (index >= _scrollView.childCount)
+            {
+                _pendingScrollIndex = -1;
+                return;
+            }
+
+            var row = _scrollView[index];
+            var viewportHeight = _scrollView.contentViewport.layout.height;
+            if (row.layout.height <= 0f || viewportHeight <= 0f || viewportHeight > _appliedMaxHeight + 0.5f)
+                return;
+
+            _pendingScrollIndex = -1;
+            ScrollRowIntoView(index);
+        }
+
+        /// <summary>True if the popup was just opened with a row already highlighted.</summary>
+        private bool OpenedWithHighlight() => _highlightedIndex >= 0;
 
         private void SetHighlighted(int index)
         {
@@ -744,6 +798,16 @@ namespace UI.Controls
         private void FocusTextFieldDeferred()
         {
             schedule.Execute(() => _textField.Focus());
+        }
+
+        /// <summary>Focuses the text field and selects its full content, deferred (see FocusTextFieldDeferred).</summary>
+        private void FocusAndSelectAllDeferred()
+        {
+            schedule.Execute(() =>
+            {
+                _textField.Focus();
+                _textField.SelectAll();
+            });
         }
 
         /// <summary>
@@ -778,40 +842,51 @@ namespace UI.Controls
             switch (evt.keyCode)
             {
                 case KeyCode.DownArrow:
-                    if (!_popupOpen) OpenPopup();
-                    MoveHighlight(1, focusRow: true);
+                    // The opening press only reveals the entry matching the text, if any.
+                    if (_popupOpen || !OpenAndHighlight())
+                        MoveHighlight(1);
                     evt.StopPropagation();
                     break;
                 case KeyCode.UpArrow:
-                    if (!_popupOpen) OpenPopup();
-                    MoveHighlight(-1, focusRow: true);
+                    if (_popupOpen || !OpenAndHighlight())
+                        MoveHighlight(-1);
                     evt.StopPropagation();
                     break;
                 case KeyCode.Home:
                     if (!_popupOpen) OpenPopup();
-                    JumpHighlight(0, focusRow: true);
+                    JumpHighlight(0);
                     evt.StopPropagation();
                     break;
                 case KeyCode.End:
                     if (!_popupOpen) OpenPopup();
-                    JumpHighlight(_displayList.Count - 1, focusRow: true);
+                    JumpHighlight(_displayList.Count - 1);
                     evt.StopPropagation();
                     break;
                 case KeyCode.PageUp:
                     if (!_popupOpen) OpenPopup();
-                    MoveHighlight(-VisibleRowCount, focusRow: true);
+                    MoveHighlight(-VisibleRowCount);
                     evt.StopPropagation();
                     break;
                 case KeyCode.PageDown:
                     if (!_popupOpen) OpenPopup();
-                    MoveHighlight(VisibleRowCount, focusRow: true);
+                    MoveHighlight(VisibleRowCount);
                     evt.StopPropagation();
                     break;
                 case KeyCode.LeftArrow:
                 case KeyCode.RightArrow:
+                    // Collapses the popup and selects the full text, so the key immediately
+                    // drops you back into plain text editing instead of leaving the popup open.
+                    if (_popupOpen)
+                    {
+                        ClosePopup();
+                        FocusAndSelectAllDeferred();
+                        evt.StopPropagation();
+                    }
+                    break;
                 case KeyCode.Backspace:
-                    // While a popup row has focus, these hand focus back to the text field
-                    // instead of doing nothing (rows have no caret/content to act on).
+                    // Rows stay focusable/tabbable for accessibility, so a row can still end up
+                    // focused via manual Tab even though arrow-key navigation no longer focuses
+                    // one itself - hand focus back to the text field in that case.
                     if (rowFocused)
                     {
                         FocusTextFieldDeferred();
@@ -845,7 +920,14 @@ namespace UI.Controls
             }
         }
 
-        private void MoveHighlight(int delta, bool focusRow = false)
+        /// <summary>Opens the popup; returns true if a row ended up highlighted by that.</summary>
+        private bool OpenAndHighlight()
+        {
+            OpenPopup();
+            return OpenedWithHighlight();
+        }
+
+        private void MoveHighlight(int delta)
         {
             if (_displayList.Count == 0) return;
 
@@ -854,7 +936,7 @@ namespace UI.Controls
             {
                 next = 0;
             }
-            else if (!IsRowVisible(_highlightedIndex))
+            else if (_pendingScrollIndex < 0 && !IsRowVisible(_highlightedIndex))
             {
                 // Mouse wheel/scrollbar never move _highlightedIndex, so it can end up scrolled
                 // out of view. Bring it back at whichever edge is nearest to where it actually
@@ -868,7 +950,7 @@ namespace UI.Controls
                 next = _highlightedIndex + delta;
             }
 
-            JumpHighlight(next, focusRow);
+            JumpHighlight(next);
         }
 
         /// <summary>True if the row at index currently intersects the scroll view's viewport.</summary>
@@ -908,19 +990,45 @@ namespace UI.Controls
             return (first, last);
         }
 
-        private void JumpHighlight(int index, bool focusRow = false)
+        private void JumpHighlight(int index)
         {
             if (_displayList.Count == 0) return;
             var next = Mathf.Clamp(index, 0, _displayList.Count - 1);
+            _pendingScrollIndex = -1;
             SetHighlighted(next);
 
+            // Deliberately doesn't focus the row - ScrollView auto-reveals a focused child,
+            // which fights manual mouse-wheel/scrollbar scrolling while a row is highlighted.
+            // The text field keeps focus throughout arrow-key browsing instead (selection is
+            // driven by _highlightedIndex, not by which element has focus).
+            ScrollRowIntoView(next);
+        }
+
+        /// <summary>
+        /// Scrolls just enough to bring the row at index fully into view, without re-centering
+        /// it if it's already visible. Sets scrollOffset directly instead of calling
+        /// ScrollView.ScrollTo() - suspected of leaving the ScrollView's own scrollbar in a
+        /// state that later resists further mouse-wheel/scrollbar scrolling past that row.
+        /// </summary>
+        private void ScrollRowIntoView(int index)
+        {
             var rows = _scrollView.Children().ToList();
-            if (next >= 0 && next < rows.Count)
-            {
-                _scrollView.ScrollTo(rows[next]);
-                if (focusRow)
-                    rows[next].Focus();
-            }
+            if (index < 0 || index >= rows.Count)
+                return;
+
+            var row = rows[index];
+            var rowTop = row.layout.y;
+            var rowBottom = rowTop + row.layout.height;
+            var viewportHeight = _scrollView.contentViewport.layout.height;
+            var scrollY = _scrollView.scrollOffset.y;
+
+            var newScrollY = scrollY;
+            if (rowTop < scrollY)
+                newScrollY = rowTop;
+            else if (rowBottom > scrollY + viewportHeight)
+                newScrollY = rowBottom - viewportHeight;
+
+            _scrollView.scrollOffset = new Vector2(_scrollView.scrollOffset.x, newScrollY);
         }
 
         // ---------------------------------------------------------------
