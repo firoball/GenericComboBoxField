@@ -153,6 +153,21 @@ namespace UI.Controls
             set => SetValueInternal(value, notify: true);
         }
 
+        /// <summary>Tooltip of the clear button. Empty shows none. Applied on the next state update (e.g. Refresh).</summary>
+        public string ClearTooltip { get; set; } = "Clear text";
+
+        /// <summary>Tooltip of the undo button. Empty shows none.</summary>
+        public string UndoTooltip { get; set; } = "Revert text to the selected value";
+
+        /// <summary>Tooltip of the arrow button. Empty shows none.</summary>
+        public string ArrowTooltip { get; set; } = "Show list";
+
+        /// <summary>Tooltip of the add button. Empty shows none.</summary>
+        public string AddTooltip { get; set; } = "Add as new entry";
+
+        /// <summary>Tooltip of the remove button. Empty shows none.</summary>
+        public string RemoveTooltip { get; set; } = "Remove entry";
+        
         /// <summary>
         /// Creates a combo box with default settings (brief mode, Add/Delete both on, no
         /// factory/sanitizer/detail builder). Configure via the properties above, then assign
@@ -447,6 +462,12 @@ namespace UI.Controls
             _addButton.SetEnabled(canAdd);
             _removeButton.style.display = showRemove ? DisplayStyle.Flex : DisplayStyle.None;
             _removeButton.SetEnabled(showRemove && isFullMatch);
+            
+            SetTooltip(_clearButton, hasText, ClearTooltip);
+            SetTooltip(_undoButton, CanUndo(), UndoTooltip);
+            SetTooltip(_arrowButton, true, ArrowTooltip);
+            SetTooltip(_addButton, canAdd, AddTooltip);
+            SetTooltip(_removeButton, showRemove && isFullMatch, RemoveTooltip);
         }
 
         /// <summary>
@@ -1063,6 +1084,13 @@ namespace UI.Controls
 
             _choices.Remove(matched);
             Refresh();
+        }
+        
+        private static void SetTooltip(VisualElement element, bool enabled, string text)
+        {
+            string value = enabled && text != null ? text : string.Empty;
+            if (element.tooltip != value)
+                element.tooltip = value;
         }
     }
 }
